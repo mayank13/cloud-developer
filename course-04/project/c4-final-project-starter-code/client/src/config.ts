@@ -1,4 +1,4 @@
-const apiId = 'vramn19c7j'
+const apiId = '43y2khn3ja'
 export const apiEndpoint = `https://${apiId}.execute-api.ap-southeast-1.amazonaws.com/dev`
 export const authConfig = {
   domain: 'whitepilcrow.eu.auth0.com',
