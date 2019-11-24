@@ -8,6 +8,7 @@ import { Jwt } from '../../auth/Jwt'
 import { JwtPayload } from '../../auth/JwtPayload'
 
 const logger = createLogger('auth')
+const authSecret = process.env.AUTH_0_SECRET;
 
 const jwksUrl = 'https://test-endpoint.auth0.com/.well-known/jwks.json'
 
@@ -52,11 +53,10 @@ export const handler = async (
 }
 
 async function verifyToken(authHeader: string): Promise<JwtPayload> {
-  const token = getToken(authHeader)
-  const jwt: Jwt = decode(token, { complete: true }) as Jwt
-
-  // TODO: Implement token verification
-  return undefined
+  const token = getToken(authHeader);
+  // Use HS256  Algo, needs to be configured in jwt io as well
+  const jwt: JwtPayload = verify(token, authSecret, { algorithms: ['HS256']}) as JwtPayload;
+  return jwt;
 }
 
 function getToken(authHeader: string): string {
