@@ -1,4 +1,4 @@
-# Serverless TODO
+# Serverless
 
 A serverless visual vocab app
 
