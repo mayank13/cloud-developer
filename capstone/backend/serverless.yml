@@ -1,0 +1,202 @@
+service:
+  name: serverless-vocab-app
+
+plugins:
+  - serverless-webpack
+  - serverless-iam-roles-per-function
+
+provider:
+  name: aws
+  runtime: nodejs8.10
+
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'ap-southeast-1'}
+
+  environment:
+    VOCAB_TABLE: Vocab-${self:provider.stage}
+    SIGNED_URL_EXPIRATION: 300
+    IMAGES_S3_BUCKET: vocab-attach-${self:provider.stage}
+    INDEX_NAME: UserIdIndex
+    AUTH_0_SECRET: WXGfDPIH0AAHXus4wg1pl5keVGbcWyWsHdCAPmhXosCt5q8_INT9Np44cOikQT0W
+
+
+functions:
+
+  Auth:
+    handler: src/lambda/auth/auth0Authorizer.handler
+
+  GetVocabs:
+    handler: src/lambda/http/getVocabs.handler
+    events:
+      - http:
+          method: get
+          path: vocabs
+          cors: true
+          authorizer: Auth
+          documentation:
+            summary: Get vocab items
+            description: Get vocab items
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Query
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.VOCAB_TABLE}
+
+  CreateVocab:
+    handler: src/lambda/http/createVocab.handler
+    events:
+      - http:
+          method: post
+          path: vocabs
+          cors: true
+          authorizer: Auth
+          reqValidatorName: RequestBodyValidator
+          documentation:
+            summary: Create a new vocab
+            description: Create a new vocab
+            requestModels:
+              'application/json': VocabRequest
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:PutItem
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.VOCAB_TABLE}
+
+  UpdateVocab:
+    handler: src/lambda/http/updateVocab.handler
+    events:
+      - http:
+          method: patch
+          path: vocabs/{vocabId}
+          cors: true
+          authorizer: Auth
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Scan
+          - dynamodb:GetItem
+          - dynamodb:UpdateItem
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.VOCAB_TABLE}
+
+  DeleteVocab:
+    handler: src/lambda/http/deleteVocab.handler
+    events:
+      - http:
+          method: delete
+          path: vocabs/{vocabId}
+          cors: true
+          authorizer: Auth
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Scan
+          - dynamodb:GetItem
+          - dynamodb:DeleteItem
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.VOCAB_TABLE}
+
+  GenUploadUrl:
+    handler: src/lambda/http/generateUploadUrl.handler
+    events:
+      - http:
+          method: post
+          path: vocabs/{vocabId}/attachment
+          cors: true
+          authorizer: Auth
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - s3:GetObject
+          - s3:PutObject
+        Resource: arn:aws:s3:::${self:provider.environment.IMAGES_S3_BUCKET}/*
+      - Effect: Allow
+        Action:
+          - dynamodb:Scan
+          - dynamodb:UpdateItem
+          - dynamodb:GetItem
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.VOCAB_TABLE}
+          
+
+resources:
+  Resources:
+    GatewayResponseDefault4XX:
+      Type: 'AWS::ApiGateway::GatewayResponse'
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Methods: "'GET,OPTIONS,POST,PATCH,PUT,DELETE'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        ResponseType: DEFAULT_4XX
+        RestApiId:
+          Ref: 'ApiGatewayRestApi'
+    VocabDynamoDBTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+          - AttributeName: createdAt
+            AttributeType: S
+          - AttributeName: vocabId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+          - AttributeName: vocabId
+            KeyType: RANGE
+        BillingMode: PAY_PER_REQUEST
+        TableName: ${self:provider.environment.VOCAB_TABLE}
+        LocalSecondaryIndexes:
+          - IndexName: ${self:provider.environment.INDEX_NAME}
+            KeySchema:
+              - AttributeName: userId
+                KeyType: HASH
+              - AttributeName: createdAt
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+
+    RequestBodyValidator:
+      Type: AWS::ApiGateway::RequestValidator
+      Properties:
+        Name: 'request-body-validator'
+        RestApiId:
+          Ref: ApiGatewayRestApi
+        ValidateRequestBody: true
+        ValidateRequestParameters: false        
+    
+    # S3 Bucket
+    AttachmentBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:provider.environment.IMAGES_S3_BUCKET}
+        CorsConfiguration:
+          CorsRules:
+            -
+              AllowedOrigins:
+                - '*'
+              AllowedHeaders:
+                - '*'
+              AllowedMethods:
+                - GET
+                - PUT
+                - POST
+                - DELETE
+                - HEAD
+              MaxAge: 3000
+
+    # S3 Bucket Policy
+    BucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        PolicyDocument:
+          Id: Policy
+          Version: '2012-10-17'
+          Statement:
+            - Sid: PublicReadWriteBucketPolicy
+              Effect: Allow
+              Principal: '*' # Anyone
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource: arn:aws:s3:::${self:provider.environment.IMAGES_S3_BUCKET}/*
+        Bucket: !Ref AttachmentBucket
